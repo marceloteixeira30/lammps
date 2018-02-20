@@ -45,7 +45,6 @@ PairCFM::PairCFM(LAMMPS *lmp) : Pair(lmp)
   no_virial_fdotr_compute = 1;
   history = 1;
   fix_history = NULL;
-  _firstContact = 0;
 
   single_extra = 10;
   svector = new double[10];
@@ -164,8 +163,14 @@ void PairCFM::compute(int eflag, int vflag)
       rsq = delx*delx + dely*dely + delz*delz;
       radj = radius[j];
       radsum = radi + radj;
+
+      if (update->ntimestep && rsq <= (radsum + _enlargeFactor)*(radsum + _enlargeFactor))
+      {
+          _isCohesive = 0; // Is cohesive = 0 ; Is not cohesive = 1
+          _trussLength = sqrt(rsq);
+      }
       
-      if (rsq >= radsum*radsum) {
+      if (rsq >= (radsum + _enlargeFactor)*(radsum + _enlargeFactor)) {
 
         // unset non-touching neighbors
 
@@ -179,13 +184,6 @@ void PairCFM::compute(int eflag, int vflag)
         r = sqrt(rsq);
         rinv = 1.0/r;
         rsqinv = 1.0/rsq;
-        
-        if (_firstContact == 0)
-	  {
-	    _trussLength = r;
-	  }
-
-	_firstContact = _firstContact + 1;
 
         // relative translational velocity
 
@@ -350,7 +348,7 @@ void PairCFM::allocate()
 
 void PairCFM::settings(int narg, char **arg)
 {
-  if (narg != 6) error->all(FLERR,"Illegal pair_style command");
+  if (narg != 9) error->all(FLERR,"Illegal pair_style command");
 
   kn = force->numeric(FLERR,arg[0]);
   if (strcmp(arg[1],"NULL") == 0) kt = kn * 2.0/7.0;
@@ -364,8 +362,12 @@ void PairCFM::settings(int narg, char **arg)
   dampflag = force->inumeric(FLERR,arg[5]);
   if (dampflag == 0) gammat = 0.0;
 
+  _t = force->numeric(FLERR,arg[6]);
+  _c = force->numeric(FLERR,arg[7]);
+  _enlargeFactor = force->numeric(FLERR,arg[8]);
+
   if (kn < 0.0 || kt < 0.0 || gamman < 0.0 || gammat < 0.0 ||
-      xmu < 0.0 || xmu > 10000.0 || dampflag < 0 || dampflag > 1)
+      xmu < 0.0 || xmu > 10000.0 || dampflag < 0 || _c < 0 || _t < 0 || _enlargeFactor < 0 || dampflag > 1)
     error->all(FLERR,"Illegal pair_style command");
 }
 
@@ -562,6 +564,9 @@ void PairCFM::write_restart_settings(FILE *fp)
   fwrite(&gammat,sizeof(double),1,fp);
   fwrite(&xmu,sizeof(double),1,fp);
   fwrite(&dampflag,sizeof(int),1,fp);
+  fwrite(&_t,sizeof(double),1,fp);
+  fwrite(&_c,sizeof(double),1,fp);
+  fwrite(&_enlargeFactor,sizeof(double),1,fp);
 }
 
 /* ----------------------------------------------------------------------
@@ -577,6 +582,9 @@ void PairCFM::read_restart_settings(FILE *fp)
     fread(&gammat,sizeof(double),1,fp);
     fread(&xmu,sizeof(double),1,fp);
     fread(&dampflag,sizeof(int),1,fp);
+    fread(&_t,sizeof(double),1,fp);
+    fread(&_c,sizeof(double),1,fp);
+    fread(&_enlargeFactor,sizeof(double),1,fp);
   }
   MPI_Bcast(&kn,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&kt,1,MPI_DOUBLE,0,world);
@@ -584,6 +592,9 @@ void PairCFM::read_restart_settings(FILE *fp)
   MPI_Bcast(&gammat,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&xmu,1,MPI_DOUBLE,0,world);
   MPI_Bcast(&dampflag,1,MPI_INT,0,world);
+  MPI_Bcast(&_t,1,MPI_DOUBLE,0,world);
+  MPI_Bcast(&_c,1,MPI_DOUBLE,0,world);
+  MPI_Bcast(&_enlargeFactor,1,MPI_DOUBLE,0,world);
 }
 
 /* ---------------------------------------------------------------------- */

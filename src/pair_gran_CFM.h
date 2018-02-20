@@ -44,12 +44,12 @@ class PairCFM : public Pair {
   double memory_usage();
 
  protected:
-  double kn,kt,gamman,gammat,xmu;
+  double kn,kt,gamman,gammat,xmu,_t,_c,_enlargeFactor;
+  int _isCohesive;
   int dampflag;
   double dt;
   int freeze_group_bit;
   int history;
-  int _firstContact;
   double _trussLength;
 
   int neighprev;
