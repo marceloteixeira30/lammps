@@ -44,13 +44,14 @@ class PairCFM : public Pair {
   double memory_usage();
 
  protected:
-  double kn,kt,gamman,gammat,xmu,_t,_c,_enlargeFactor;
-  int _isCohesive;
-  int dampflag;
+  double kn,kt,gamman,gammat,xmu,_t,_c,_enlargeFactor; // input variables
+  int **_isCohesive;
+  int dampflag; // input variable
   double dt;
   int freeze_group_bit;
   int history;
-  double _trussLength;
+  double _Dtensile,_D,_initialD;
+  int _tensileBreakage;
 
   int neighprev;
   double *onerad_dynamic,*onerad_frozen;

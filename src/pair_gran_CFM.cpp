@@ -85,7 +85,7 @@ void PairCFM::compute(int eflag, int vflag)
 {
   int i,j,ii,jj,inum,jnum;
   double xtmp,ytmp,ztmp,delx,dely,delz,fx,fy,fz;
-  double radi,radj,radsum,rsq,r,rinv,rsqinv;
+  double radi,radj,radmin,radsum,rsq,r,rinv,rsqinv;
   double vr1,vr2,vr3,vnnr,vn1,vn2,vn3,vt1,vt2,vt3;
   double wr1,wr2,wr3;
   double vtr1,vtr2,vtr3,vrel;
@@ -164,13 +164,33 @@ void PairCFM::compute(int eflag, int vflag)
       radj = radius[j];
       radsum = radi + radj;
 
-      if (update->ntimestep && rsq <= (radsum + _enlargeFactor)*(radsum + _enlargeFactor))
+      // for the first timestep, create bonds
+      // if the distance between the particles is less or equal the enlarge factor
+
+      if (update->ntimestep < 2 && rsq <= (radsum + _enlargeFactor)*(radsum + _enlargeFactor))
       {
-          _isCohesive = 0; // Is cohesive = 0 ; Is not cohesive = 1
-          _trussLength = sqrt(rsq);
+          _isCohesive[i][j] = 0; // is cohesive = 0 ; is not cohesive = 1
+          _initialD = radsum - sqrt(rsq); // save the initial distance between the particles as the equilibrium distance -negative for separate and positive for penetration
+
+          if (radi<radj)
+          {
+              radmin = radi;
+          }
+          else
+          {
+              radmin = radj;
+          }
+
+          _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
       }
-      
-      if (rsq >= (radsum + _enlargeFactor)*(radsum + _enlargeFactor)) {
+      else if (update->ntimestep < 2 && rsq > (radsum + _enlargeFactor)*(radsum + _enlargeFactor))
+      {
+          _isCohesive[i][j] = 1;
+      }
+
+      _D = (radsum - sqrt(rsq)) - _initialD;
+
+      if (_isCohesive[i][j] == 1 && rsq > radsum*radsum) {
 
         // unset non-touching neighbors
 
@@ -180,7 +200,24 @@ void PairCFM::compute(int eflag, int vflag)
         shear[1] = 0.0;
         shear[2] = 0.0;
 
-      } else {
+      }
+      if (_D < 0)   // if particles are further apart than in the initial state
+      {
+          if (_isCohesive[i][j] == 1)   // if particles are not cohesive
+          {
+              touch[jj] = 0;
+              shear = &allshear[3*jj];
+              shear[0] = 0.0;
+              shear[1] = 0.0;
+              shear[2] = 0.0;
+          }
+          if (((-1.0*_D) > _Dtensile) && (_isCohesive[i][j] == 0))  // if the current displacement is bigger than the allowed
+          {
+              _isCohesive[i][j] = 1;
+              _tensileBreakage++;
+          }
+      }
+      else{
         r = sqrt(rsq);
         rinv = 1.0/r;
         rsqinv = 1.0/rsq;
