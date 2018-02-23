@@ -94,7 +94,7 @@ void PairCFM::compute(int eflag, int vflag)
   double shrmag,rsht;
   int *ilist,*jlist,*numneigh,**firstneigh;
   int *touch,**firsttouch;
-  double *shear,*allshear,**firstshear;
+  double *_history,*allshear,**firstshear;
 
   if (eflag || vflag) ev_setup(eflag,vflag);
   else evflag = vflag_fdotr = 0;
@@ -164,13 +164,15 @@ void PairCFM::compute(int eflag, int vflag)
       radj = radius[j];
       radsum = radi + radj;
 
+      _history = &allshear[3*jj];   // history[0] = shear1 / history[1] = shear2 / history[2] = shear3 / history[3] = isCohesive / history[4] = initialD / history[5] = tensileBreakage
+
       // for the first timestep, create bonds
       // if the distance between the particles is less or equal the enlarge factor
 
       if (update->ntimestep < 2 && rsq <= (radsum + _enlargeFactor)*(radsum + _enlargeFactor))
       {
-          _isCohesive[i][j] = 0; // is cohesive = 0 ; is not cohesive = 1
-          _initialD = radsum - sqrt(rsq); // save the initial distance between the particles as the equilibrium distance -negative for separate and positive for penetration
+          _history[3] = 0.0; // is cohesive = 0.0 ; is not cohesive = 1.0
+          _history[4] = radsum - sqrt(rsq); // save the initial distance between the particles as the equilibrium distance -negative for separate and positive for penetration
 
           if (radi<radj)
           {
@@ -183,38 +185,41 @@ void PairCFM::compute(int eflag, int vflag)
 
           _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
       }
-      else if (update->ntimestep < 2 && rsq > (radsum + _enlargeFactor)*(radsum + _enlargeFactor))
+
+      if (update->ntimestep < 2 && rsq > (radsum + _enlargeFactor)*(radsum + _enlargeFactor))
       {
-          _isCohesive[i][j] = 1;
+          _history[3] = 1.0;
       }
 
-      _D = (radsum - sqrt(rsq)) - _initialD;
-
-      if (_isCohesive[i][j] == 1 && rsq > radsum*radsum) {
+      if (_history[3] == 1.0 && rsq > radsum*radsum) {
 
         // unset non-touching neighbors
 
         touch[jj] = 0;
-        shear = &allshear[3*jj];
-        shear[0] = 0.0;
-        shear[1] = 0.0;
-        shear[2] = 0.0;
+        //history = &allshear[3*jj];
+        _history[0] = 0.0;
+        _history[1] = 0.0;
+        _history[2] = 0.0;
 
       }
+
+      _D = (radsum - sqrt(rsq)) - _history[4];
+
       if (_D < 0)   // if particles are further apart than in the initial state
       {
-          if (_isCohesive[i][j] == 1)   // if particles are not cohesive
+          if (_history[3] == 1.0)   // if particles are not cohesive
           {
               touch[jj] = 0;
-              shear = &allshear[3*jj];
-              shear[0] = 0.0;
-              shear[1] = 0.0;
-              shear[2] = 0.0;
+              //history = &allshear[3*jj];
+              _history[0] = 0.0;
+              _history[1] = 0.0;
+              _history[2] = 0.0;
           }
-          if (((-1.0*_D) > _Dtensile) && (_isCohesive[i][j] == 0))  // if the current displacement is bigger than the allowed
+          if (((-1.0*_D) > _Dtensile) && (_history[3] == 0.0))  // if the current displacement is bigger than the allowed
           {
-              _isCohesive[i][j] = 1;
-              _tensileBreakage++;
+              _history[3] = 1.0;
+              //_history = &allshear[3*jj];
+              _history[5] = _history[5] + 1.0;
           }
       }
       else{
@@ -278,44 +283,54 @@ void PairCFM::compute(int eflag, int vflag)
         // shear history effects
 
         touch[jj] = 1;
-        shear = &allshear[3*jj];
+        //_history = &allshear[3*jj];
 
         if (shearupdate) {
-          shear[0] += vtr1*dt;
-          shear[1] += vtr2*dt;
-          shear[2] += vtr3*dt;
+          _history[0] += vtr1*dt;
+          _history[1] += vtr2*dt;
+          _history[2] += vtr3*dt;
         }
-        shrmag = sqrt(shear[0]*shear[0] + shear[1]*shear[1] +
-                      shear[2]*shear[2]);
+
+        shrmag = sqrt(_history[0]*_history[0] + _history[1]*_history[1] +
+                      _history[2]*_history[2]);
 
         // rotate shear displacements
 
-        rsht = shear[0]*delx + shear[1]*dely + shear[2]*delz;
+        rsht = _history[0]*delx + _history[1]*dely + _history[2]*delz;
         rsht *= rsqinv;
         if (shearupdate) {
-          shear[0] -= rsht*delx;
-          shear[1] -= rsht*dely;
-          shear[2] -= rsht*delz;
+          _history[0] -= rsht*delx;
+          _history[1] -= rsht*dely;
+          _history[2] -= rsht*delz;
         }
 
         // tangential forces = shear + tangential velocity damping
 
-        fs1 = - (kt*shear[0] + meff*gammat*vtr1);
-        fs2 = - (kt*shear[1] + meff*gammat*vtr2);
-        fs3 = - (kt*shear[2] + meff*gammat*vtr3);
+        fs1 = - (kt*_history[0] + meff*gammat*vtr1);
+        fs2 = - (kt*_history[1] + meff*gammat*vtr2);
+        fs3 = - (kt*_history[2] + meff*gammat*vtr3);
 
         // rescale frictional displacements and forces if needed
 
-        fs = sqrt(fs1*fs1 + fs2*fs2 + fs3*fs3);
-        fn = xmu * fabs(ccel*r);
+        if (_history[3] == 0.0)
+        {
+            _maxShearForce = M_PI * radmin * _c;
+            fn = xmu * fabs(ccel*r) + _maxShearForce;
+        }
+        else
+        {
+           fn = xmu * fabs(ccel*r);
+        }
 
-        if (fs > fn) {
+        fs = sqrt(fs1*fs1 + fs2*fs2 + fs3*fs3);
+
+        if (fs > fn + _maxShearForce) {
           if (shrmag != 0.0) {
-            shear[0] = (fn/fs) * (shear[0] + meff*gammat*vtr1/kt) -
+            _history[0] = (fn/fs) * (_history[0] + meff*gammat*vtr1/kt) -
               meff*gammat*vtr1/kt;
-            shear[1] = (fn/fs) * (shear[1] + meff*gammat*vtr2/kt) -
+            _history[1] = (fn/fs) * (_history[1] + meff*gammat*vtr2/kt) -
               meff*gammat*vtr2/kt;
-            shear[2] = (fn/fs) * (shear[2] + meff*gammat*vtr3/kt) -
+            _history[2] = (fn/fs) * (_history[2] + meff*gammat*vtr3/kt) -
               meff*gammat*vtr3/kt;
             fs1 *= fn/fs;
             fs2 *= fn/fs;
@@ -459,7 +474,7 @@ void PairCFM::init_style()
 
   if (history && fix_history == NULL) {
     char dnumstr[16];
-    sprintf(dnumstr,"%d",3);
+    sprintf(dnumstr,"%d",6);
     char **fixarg = new char*[4];
     fixarg[0] = (char *) "NEIGH_HISTORY";
     fixarg[1] = (char *) "all";

@@ -31,7 +31,6 @@ class FixNeighHistory : public Fix {
   int nall_neigh;               // ditto for nlocal+nghost
   int **firstflag;              // ptr to each atom's neighbor flsg
   double **firstvalue;          // ptr to each atom's values
-  int **_isCohesive;         // ptr to each atom's information about cohesion (0 = true / 1 = false)
   class Pair *pair;             // ptr to pair style that uses neighbor history
 
   FixNeighHistory(class LAMMPS *, int, char **);
@@ -63,7 +62,6 @@ class FixNeighHistory : public Fix {
  protected:
   int newton_pair;              // same as force setting
   int dnum,dnumbytes;          // dnum = # of values per neighbor
-  int inumbytes;
   int onesided;                 // 1 for line/tri history, else 0
 
   int maxatom;                  // max size of firstflag and firstvalue
@@ -76,7 +74,6 @@ class FixNeighHistory : public Fix {
   int *npartner;                // # of partners of each atom
   tagint **partner;             // global atom IDs for the partners
   double **valuepartner;        // values for the partners
-  int **cohesiveSave;
   int maxpartner;               // max # of partners for any of my atoms
 
   // per-atom data structs pointed to by partner & valuepartner

@@ -45,13 +45,11 @@ class PairCFM : public Pair {
 
  protected:
   double kn,kt,gamman,gammat,xmu,_t,_c,_enlargeFactor; // input variables
-  int **_isCohesive;
   int dampflag; // input variable
   double dt;
   int freeze_group_bit;
   int history;
-  double _Dtensile,_D,_initialD;
-  int _tensileBreakage;
+  double _Dtensile,_D,_maxShearForce;
 
   int neighprev;
   double *onerad_dynamic,*onerad_frozen;
