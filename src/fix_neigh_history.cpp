@@ -47,6 +47,7 @@ FixNeighHistory::FixNeighHistory(LAMMPS *lmp, int narg, char **arg) :
 
   dnum = force->inumeric(FLERR,arg[3]);
   dnumbytes = dnum * sizeof(double);
+  inumbytes = dnum * sizeof(int);
 
   zeroes = new double[dnum];
   for (int i = 0; i < dnum; i++) zeroes[i] = 0.0;
@@ -72,6 +73,7 @@ FixNeighHistory::FixNeighHistory(LAMMPS *lmp, int narg, char **arg) :
 
   firstflag = NULL;
   firstvalue = NULL;
+  _isCohesive = NULL;
   maxatom = 0;
 
   // per-atom and per-neighbor data structs
@@ -106,6 +108,7 @@ FixNeighHistory::~FixNeighHistory()
 
   memory->sfree(firstflag);
   memory->sfree(firstvalue);
+  memory->sfree(_isCohesive);
 
   memory->destroy(npartner);
   memory->sfree(partner);
@@ -120,6 +123,7 @@ FixNeighHistory::~FixNeighHistory()
 
   firstflag = NULL;
   firstvalue = NULL;
+  _isCohesive = NULL;
 
   pair = NULL;
   npartner = NULL;
@@ -223,7 +227,7 @@ void FixNeighHistory::pre_exchange_onesided()
 {
   int i,j,ii,jj,m,n,inum,jnum;
   int *ilist,*jlist,*numneigh,**firstneigh;
-  int *allflags;
+  int *allflags,*cohesiveTest,*oneCohesive;
   double *allvalues,*onevalues;
 
   // NOTE: all operations until very end are with nlocal_neigh <= current nlocal
@@ -280,15 +284,18 @@ void FixNeighHistory::pre_exchange_onesided()
     jnum = numneigh[i];
     allflags = firstflag[i];
     allvalues = firstvalue[i];
+    cohesiveTest = _isCohesive[i];
 
     for (jj = 0; jj < jnum; jj++) {
       if (allflags[jj]) {
         onevalues = &allvalues[dnum*jj];
+        oneCohesive = &cohesiveTest[dnum*jj];
         j = jlist[jj];
         j &= NEIGHMASK;
         m = npartner[i]++;
         partner[i][m] = tag[j];
         memcpy(&valuepartner[i][dnum*m],onevalues,dnumbytes);
+        memcpy(&cohesiveSave[i][dnum*m],oneCohesive,inumbytes);
       }
     }
   }
