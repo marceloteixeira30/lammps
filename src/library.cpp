@@ -412,6 +412,77 @@ void *lammps_extract_global(void *ptr, char *name)
 }
 
 /* ----------------------------------------------------------------------
+   extract simulation pair parameters
+   see pair.h and force.h for definition of these arguments
+------------------------------------------------------------------------- */
+
+void *lammps_extract_pair(void *ptr, char *id, int style, int type)
+{
+  LAMMPS *lmp = (LAMMPS *) ptr;
+
+  // if (strcmp(name,"dt") == 0) return (void *) &lmp->force->pair_match(cfm,0,0);
+
+  BEGIN_CAPTURE
+  {
+    int icompute = lmp->modify->find_compute(id);
+    if (icompute < 0) return NULL;
+    Compute *compute = lmp->modify->compute[icompute];
+
+    if (style == 0) {
+      if (type == 0) {
+        if (!compute->scalar_flag) return NULL;
+        if (compute->invoked_scalar != lmp->update->ntimestep)
+          compute->compute_scalar();
+        return (void *) &compute->scalar;
+      }
+      if (type == 1) {
+        if (!compute->vector_flag) return NULL;
+        if (compute->invoked_vector != lmp->update->ntimestep)
+          compute->compute_vector();
+        return (void *) compute->vector;
+      }
+      if (type == 2) {
+        if (!compute->array_flag) return NULL;
+        if (compute->invoked_array != lmp->update->ntimestep)
+          compute->compute_array();
+        return (void *) compute->array;
+      }
+    }
+
+    if (style == 1) {
+      if (!compute->peratom_flag) return NULL;
+      if (type == 1) {
+        if (compute->invoked_peratom != lmp->update->ntimestep)
+          compute->compute_peratom();
+        return (void *) compute->vector_atom;
+      }
+      if (type == 2) {
+        if (compute->invoked_peratom != lmp->update->ntimestep)
+          compute->compute_peratom();
+        return (void *) compute->array_atom;
+      }
+    }
+
+    if (style == 2) {
+      if (!compute->local_flag) return NULL;
+      if (type == 1) {
+        if (compute->invoked_local != lmp->update->ntimestep)
+          compute->compute_local();
+        return (void *) compute->vector_local;
+      }
+      if (type == 2) {
+        if (compute->invoked_local != lmp->update->ntimestep)
+          compute->compute_local();
+        return (void *) compute->array_local;
+      }
+    }
+  }
+  END_CAPTURE
+
+  return NULL;
+}
+
+/* ----------------------------------------------------------------------
    extract simulation box parameters
    see domain.h for definition of these arguments
    domain->init() call needed to set box_change

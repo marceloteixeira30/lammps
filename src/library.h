@@ -40,6 +40,7 @@ void lammps_extract_box(void *, double *, double *,
                         double *, double *, double *, int *, int *);
 void *lammps_extract_atom(void *, char *);
 void *lammps_extract_compute(void *, char *, int, int);
+void *lammps_extract_pair(void *, char *, int, int);
 void *lammps_extract_fix(void *, char *, int, int, int, int);
 void *lammps_extract_variable(void *, char *, char *);
 
