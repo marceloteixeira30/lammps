@@ -172,82 +172,70 @@ void PairCFM::compute(int eflag, int vflag)
 
       radmin = fmin(radj,radi);
 
-      double _ignore = 1.0; // if ignore = -1, then, do not evaluate forces
+      int _ignore = 1; // if ignore = -1, then, do not evaluate forces
 
-      if (_history[3] != 1.0 && _history[3] != -1.0){
-          if (update->ntimestep < 1){
-              if (rsq <= (_enlargeFactor*radsum)*(_enlargeFactor*radsum)){
-                  _history[3] = 1.0; // is cohesive = 1.0 ; is not cohesive = -1.0
-                  _history[4] = radsum - sqrt(rsq); // save the initial distance between the particles as the equilibrium distance -negative for separate and positive for penetration
-              }
-              else{
-                  _history[0] = 0.0;
-                  _history[1] = 0.0;
-                  _history[2] = 0.0;
-                  _history[3] = -1.0;
-                  _history[4] = 0.0;
-                  _history[5] = 0.0;
-                  _history[6] = 0.0;
-                  _ignore = -1.0;
-              }
+      if (update->ntimestep < 1){
+          _history[0] = 0.0;
+          _history[1] = 0.0;
+          _history[2] = 0.0;
+          _history[5] = 0.0;
+          _history[6] = 0.0;
+          if (rsq <= (_enlargeFactor*radsum)*(_enlargeFactor*radsum)){
+              _history[3] = 1.0; // is cohesive = 1.0 ; is not cohesive = -1.0
+              _history[4] = radsum - sqrt(rsq); // save the initial distance between the particles as the equilibrium distance -negative for separate and positive for penetration
           }
-          else {
-              _history[0] = 0.0;
-              _history[1] = 0.0;
-              _history[2] = 0.0;
+          else{
+              touch[jj] = 0;
               _history[3] = -1.0;
-              _history[4] = 0.0;
+              _ignore = -1;
           }
       }
 
-      if (_history[3] == -1.0 && rsq >= radsum*radsum) {
+      if (_history[3] < 0 && rsq >= radsum*radsum) {
 
         // unset non-touching neighbors
 
         touch[jj] = 0;
-        //history = &allshear[3*jj];
         _history[0] = 0.0;
         _history[1] = 0.0;
         _history[2] = 0.0;
-        _history[4] = 0.0;
-        _ignore = -1.0;
+        _ignore = -1;
 
       }
 
-      if (_history[3] == -1.0)
+      if (_history[3] > 0)
       {
-          _Dtensile = 0.0;
+          _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
+          _D = (radsum - sqrt(rsq)) - _history[4];
       }
-      else _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
-
-      _D = (radsum - sqrt(rsq)) - _history[4];
+      else {
+          _Dtensile = 0.0;
+          _D = radsum - sqrt(rsq);
+      }
 
       if (_D < 0)   // if particles are further apart than in the initial state
       {
-          if (_history[3] == -1.0)   // if particles are not cohesive
+          if (_history[3] < 0)   // if particles are not cohesive
           {
               touch[jj] = 0;
-              //history = &allshear[3*jj];
               _history[0] = 0.0;
               _history[1] = 0.0;
               _history[2] = 0.0;
-              _history[4] = 0.0;
-              _ignore = -1.0;
+              _ignore = -1;
           }
-          if (((-1.0*_D) > _Dtensile) && (_history[3] == 1.0))  // if the current displacement is bigger than the allowed
+          if (((-1.0*_D) > _Dtensile) && (_history[3] > 0))  // if the current displacement is bigger than the allowed
           {
               touch[jj] = 0;
               _history[0] = 0.0;
               _history[1] = 0.0;
               _history[2] = 0.0;
               _history[3] = -1.0;
-              _history[4] = 0.0;
-              //_history = &allshear[3*jj];
               _history[5] += 1.0;
-              _ignore = -1.0;
+              _ignore = -1;
           }
       }
-      if (_ignore != -1.0){
+
+      if (_ignore != -1){
         r = sqrt(rsq);
         rinv = 1.0/r;
         rsqinv = 1.0/rsq;
@@ -338,7 +326,7 @@ void PairCFM::compute(int eflag, int vflag)
 
         // rescale frictional displacements and forces if needed
 
-        if (_history[3] == 1.0)
+        if (_history[3] > 0)
         {
             _maxShearForce = M_PI * radmin * _c;
             fn = xmu * fabs(ccel*r) + _maxShearForce;
@@ -362,9 +350,8 @@ void PairCFM::compute(int eflag, int vflag)
             fs3 *= fn/fs;
           } else fs1 = fs2 = fs3 = 0.0;
 
-          if (_history[3] == 1.0){
+          if (_history[3] > 0){
               _history[6] += + 1.0;
-              _history[4] = 0.0;
               _history[3] = -1.0;
               if (_D < 0.0){
                   touch[jj] = 0;
@@ -405,6 +392,11 @@ void PairCFM::compute(int eflag, int vflag)
 
         if (evflag) ev_tally_xyz(i,j,nlocal,newton_pair,
                                  0.0,0.0,fx,fy,fz,delx,dely,delz);
+
+        if (_history[3] > 0.0){
+            _history[3] = 1.0;
+        }
+        else if (_history[3] < 0.0) _history[3] = -1.0;
       }
     }
   }
@@ -703,254 +695,288 @@ double PairCFM::single(int i, int j, int itype, int jtype,
                                     double factor_coul, double factor_lj,
                                     double &fforce)
 {
-  double radi,radj,radsum;
-  double r,rinv,rsqinv,delx,dely,delz;
-  double vr1,vr2,vr3,vnnr,vn1,vn2,vn3,vt1,vt2,vt3,wr1,wr2,wr3;
-  double mi,mj,meff,damp,ccel;
-  double vtr1,vtr2,vtr3,vrel,shrmag,rsht;
-  double fs1,fs2,fs3,fs,fn;
+      double radi,radj,radsum;
+      double r,rinv,rsqinv,delx,dely,delz;
+      double vr1,vr2,vr3,vnnr,vn1,vn2,vn3,vt1,vt2,vt3,wr1,wr2,wr3;
+      double mi,mj,meff,damp,ccel;
+      double vtr1,vtr2,vtr3,vrel,shrmag,rsht;
+      double fs1,fs2,fs3,fs,fn;
 
-  int shearupdate = 1;
+      int shearupdate = 1;
 
-  double *radius = atom->radius;
-  radi = radius[i];
-  radj = radius[j];
-  radsum = radi + radj;
+      double *radius = atom->radius;
+      radi = radius[i];
+      radj = radius[j];
+      radsum = radi + radj;
 
-  double *allshear = fix_history->firstvalue[i];
-  double *_history = &allshear[3*neighprev];
-  double radmin = fmin(radi,radj);
+      double *allshear = fix_history->firstvalue[i];
+      double *_history = &allshear[3*neighprev];
+      double radmin = fmin(radi,radj);
 
-//  double *allshear_j = fix_history->firstvalue[j];
-//  double *_history_j = &allshear[3*neighprev];
+      svector[0] = i;
+      svector[1] = j;
+      svector[2] = sqrt(rsq);
+      svector[3] = _history[3];
+      svector[4] = _history[4];
+      svector[5] = _history[0];
+      svector[6] = _history[1];
+      svector[7] = _history[2];
+      svector[8] = _history[5];
+      svector[9] = _history[6];
+//      svector[7] = _history[1];
+//      svector[8] = _history[1];
+//      svector[9] = _history[1];
+//      svector[10] = _history[1];
+//      svector[11] = _history[1];
 
-  if (_history[3] != 1.0 && _history[3] != -1.0){
-      if (update->ntimestep < 1){
-          if (rsq < (_enlargeFactor*radsum)*(_enlargeFactor*radsum)){
-              _history[3] = 1.0;
-              _history[4] = radsum - sqrt(rsq);
-              _Dtensile = (M_PI * radmin * _t) / kn;
-          }
-          else{
-              _history[0] = 0.0;
-              _history[1] = 0.0;
-              _history[2] = 0.0;
-              _history[3] = -1.0;
-              _history[4] = 0.0;
-              _history[5] = 0.0;
-              _history[6] = 0.0;
-              fforce = 0.0;
-              for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
-              return 0.0;
-          }
-      }
-      else {
-          _history[0] = 0.0;
-          _history[1] = 0.0;
-          _history[2] = 0.0;
-          _history[3] = -1.0;
-          _history[4] = 0.0;
-      }
-  }
 
-  if (_history[3] == -1.0 && rsq >= radsum*radsum) {
-    fforce = 0.0;
-    for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
-    return 0.0;
-  }
 
-  if (_history[3] == -1.0)
-  {
-      _Dtensile = 0.0;
-  }
-  else _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
 
-  _D = (radsum -sqrt(rsq)) - _history[4];
+//  double radi,radj,radsum;
+//  double r,rinv,rsqinv,delx,dely,delz;
+//  double vr1,vr2,vr3,vnnr,vn1,vn2,vn3,vt1,vt2,vt3,wr1,wr2,wr3;
+//  double mi,mj,meff,damp,ccel;
+//  double vtr1,vtr2,vtr3,vrel,shrmag,rsht;
+//  double fs1,fs2,fs3,fs,fn;
 
-  if(_D < 0){
-      if (_history[3] == -1.0){
-          fforce = 0.0;
-          _history[0] = 0.0;
-          _history[1] = 0.0;
-          _history[2] = 0.0;
-          _history[4] = 0.0;
-          for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
-          return 0.0;
-      }
-      if (((-1.0*_D) > _Dtensile) && (_history[3] == 1.0)){
-          _history[0] = 0.0;
-          _history[1] = 0.0;
-          _history[2] = 0.0;
-          _history[3] = -1.0;
-          _history[4] = 0.0;
-          _history[5]+= 1.0;
-          fforce = 0.0;
-          for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
-          return 0.0;
-      }
-  }
+//  int shearupdate = 1;
 
-      r = sqrt(rsq);
-      rinv = 1.0/r;
-      rsqinv = 1.0/rsq;
+//  double *radius = atom->radius;
+//  radi = radius[i];
+//  radj = radius[j];
+//  radsum = radi + radj;
 
-      // relative translational velocity
+//  double *allshear = fix_history->firstvalue[i];
+//  double *_history = &allshear[3*neighprev];
+//  double radmin = fmin(radi,radj);
 
-      double **v = atom->v;
-      vr1 = v[i][0] - v[j][0];
-      vr2 = v[i][1] - v[j][1];
-      vr3 = v[i][2] - v[j][2];
+//  if (_history[3] != 1.0 && _history[3] != -1.0){
+//      if (update->ntimestep < 1){
+//          if (rsq < (_enlargeFactor*radsum)*(_enlargeFactor*radsum)){
+//              //_history[3] = 1.0;
+//              //_history[4] = radsum - sqrt(rsq);
+//              _Dtensile = (M_PI * radmin * _t) / kn;
+//          }
+//          else{
+//              _history[0] = 0.0;
+//              _history[1] = 0.0;
+//              _history[2] = 0.0;
+//              _history[3] = -1.0;
+//              _history[4] = 0.0;
+//              _history[5] = 0.0;
+//              _history[6] = 0.0;
+//              fforce = 0.0;
+//              for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
+//              return 0.0;
+//          }
+//      }
+//      else {
+//          _history[0] = 0.0;
+//          _history[1] = 0.0;
+//          _history[2] = 0.0;
+//          _history[3] = -1.0;
+//          _history[4] = 0.0;
+//      }
+//  }
 
-      // normal component
+//  if (_history[3] == -1.0 && rsq >= radsum*radsum) {
+//    fforce = 0.0;
+//    for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
+//    return 0.0;
+//  }
 
-      double **x = atom->x;
-      delx = x[i][0] - x[j][0];
-      dely = x[i][1] - x[j][1];
-      delz = x[i][2] - x[j][2];
+//  if (_history[3] == -1.0)
+//  {
+//      _Dtensile = 0.0;
+//  }
+//  else _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
 
-      vnnr = vr1*delx + vr2*dely + vr3*delz;
-      vn1 = delx*vnnr * rsqinv;
-      vn2 = dely*vnnr * rsqinv;
-      vn3 = delz*vnnr * rsqinv;
+//  _D = (radsum -sqrt(rsq)) - _history[4];
 
-      // tangential component
+//  if(_D < 0){
+//      if (_history[3] == -1.0){
+//          fforce = 0.0;
+//          _history[0] = 0.0;
+//          _history[1] = 0.0;
+//          _history[2] = 0.0;
+//          _history[4] = 0.0;
+//          for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
+//          return 0.0;
+//      }
+//      if (((-1.0*_D) > _Dtensile) && (_history[3] == 1.0)){
+//          _history[0] = 0.0;
+//          _history[1] = 0.0;
+//          _history[2] = 0.0;
+//          _history[3] = -1.0;
+//          _history[4] = 0.0;
+//          _history[5]+= 1.0;
+//          fforce = 0.0;
+//          for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
+//          return 0.0;
+//      }
+//  }
 
-      vt1 = vr1 - vn1;
-      vt2 = vr2 - vn2;
-      vt3 = vr3 - vn3;
+//      r = sqrt(rsq);
+//      rinv = 1.0/r;
+//      rsqinv = 1.0/rsq;
 
-      // relative rotational velocity
+//      // relative translational velocity
 
-      double **omega = atom->omega;
-      wr1 = (radi*omega[i][0] + radj*omega[j][0]) * rinv;
-      wr2 = (radi*omega[i][1] + radj*omega[j][1]) * rinv;
-      wr3 = (radi*omega[i][2] + radj*omega[j][2]) * rinv;
+//      double **v = atom->v;
+//      vr1 = v[i][0] - v[j][0];
+//      vr2 = v[i][1] - v[j][1];
+//      vr3 = v[i][2] - v[j][2];
 
-      // meff = effective mass of pair of particles
-      // if I or J part of rigid body, use body mass
-      // if I or J is frozen, meff is other particle
+//      // normal component
 
-      double *rmass = atom->rmass;
-      int *mask = atom->mask;
+//      double **x = atom->x;
+//      delx = x[i][0] - x[j][0];
+//      dely = x[i][1] - x[j][1];
+//      delz = x[i][2] - x[j][2];
 
-      mi = rmass[i];
-      mj = rmass[j];
-      if (fix_rigid) {
-        // NOTE: insure mass_rigid is current for owned+ghost atoms?
-        if (mass_rigid[i] > 0.0) mi = mass_rigid[i];
-        if (mass_rigid[j] > 0.0) mj = mass_rigid[j];
-      }
+//      vnnr = vr1*delx + vr2*dely + vr3*delz;
+//      vn1 = delx*vnnr * rsqinv;
+//      vn2 = dely*vnnr * rsqinv;
+//      vn3 = delz*vnnr * rsqinv;
 
-      meff = mi*mj / (mi+mj);
-      if (mask[i] & freeze_group_bit) meff = mj;
-      if (mask[j] & freeze_group_bit) meff = mi;
+//      // tangential component
 
-      // normal forces = Hookian contact + normal velocity damping
+//      vt1 = vr1 - vn1;
+//      vt2 = vr2 - vn2;
+//      vt3 = vr3 - vn3;
 
-      damp = meff*gamman*vnnr*rsqinv;
-      //ccel = kn*(radsum-r)*rinv - damp;
-      ccel = kn*(_D)*rinv - damp;
+//      // relative rotational velocity
 
-      // relative velocities
+//      double **omega = atom->omega;
+//      wr1 = (radi*omega[i][0] + radj*omega[j][0]) * rinv;
+//      wr2 = (radi*omega[i][1] + radj*omega[j][1]) * rinv;
+//      wr3 = (radi*omega[i][2] + radj*omega[j][2]) * rinv;
 
-      vtr1 = vt1 - (delz*wr2-dely*wr3);
-      vtr2 = vt2 - (delx*wr3-delz*wr1);
-      vtr3 = vt3 - (dely*wr1-delx*wr2);
-      vrel = vtr1*vtr1 + vtr2*vtr2 + vtr3*vtr3;
-      vrel = sqrt(vrel);
+//      // meff = effective mass of pair of particles
+//      // if I or J part of rigid body, use body mass
+//      // if I or J is frozen, meff is other particle
 
-      // shear history effects
-      // neighprev = index of found neigh on previous call
-      // search entire jnum list of neighbors of I for neighbor J
-      // start from neighprev, since will typically be next neighbor
-      // reset neighprev to 0 as necessary
+//      double *rmass = atom->rmass;
+//      int *mask = atom->mask;
 
-      int jnum = list->numneigh[i];
-      int *jlist = list->firstneigh[i];
+//      mi = rmass[i];
+//      mj = rmass[j];
+//      if (fix_rigid) {
+//        // NOTE: insure mass_rigid is current for owned+ghost atoms?
+//        if (mass_rigid[i] > 0.0) mi = mass_rigid[i];
+//        if (mass_rigid[j] > 0.0) mj = mass_rigid[j];
+//      }
 
-      for (int jj = 0; jj < jnum; jj++) {
-        neighprev++;
-        if (neighprev >= jnum) neighprev = 0;
-        if (jlist[neighprev] == j) break;
-      }
+//      meff = mi*mj / (mi+mj);
+//      if (mask[i] & freeze_group_bit) meff = mj;
+//      if (mask[j] & freeze_group_bit) meff = mi;
 
-      //double *shear = &allshear[3*neighprev];
-      shrmag = sqrt(_history[0]*_history[0] + _history[1]*_history[1] +
-                    _history[2]*_history[2]);
+//      // normal forces = Hookian contact + normal velocity damping
 
-      // rotate shear displacements
+//      damp = meff*gamman*vnnr*rsqinv;
+//      //ccel = kn*(radsum-r)*rinv - damp;
+//      ccel = kn*(_D)*rinv - damp;
 
-      rsht = _history[0]*delx + _history[1]*dely + _history[2]*delz;
-      rsht *= rsqinv;
+//      // relative velocities
 
-      if (shearupdate) {
-        _history[0] -= rsht*delx;
-        _history[1] -= rsht*dely;
-        _history[2] -= rsht*delz;
-      }
+//      vtr1 = vt1 - (delz*wr2-dely*wr3);
+//      vtr2 = vt2 - (delx*wr3-delz*wr1);
+//      vtr3 = vt3 - (dely*wr1-delx*wr2);
+//      vrel = vtr1*vtr1 + vtr2*vtr2 + vtr3*vtr3;
+//      vrel = sqrt(vrel);
 
-      // tangential forces = shear + tangential velocity damping
+//      // shear history effects
+//      // neighprev = index of found neigh on previous call
+//      // search entire jnum list of neighbors of I for neighbor J
+//      // start from neighprev, since will typically be next neighbor
+//      // reset neighprev to 0 as necessary
 
-      fs1 = - (kt*_history[0] + meff*gammat*vtr1);
-      fs2 = - (kt*_history[1] + meff*gammat*vtr2);
-      fs3 = - (kt*_history[2] + meff*gammat*vtr3);
+//      int jnum = list->numneigh[i];
+//      int *jlist = list->firstneigh[i];
 
-      // rescale frictional displacements and forces if needed
+//      for (int jj = 0; jj < jnum; jj++) {
+//        neighprev++;
+//        if (neighprev >= jnum) neighprev = 0;
+//        if (jlist[neighprev] == j) break;
+//      }
 
-      if (_history[3] == 1.0){
-          _maxShearForce = M_PI * radmin * _c;
-          fn = xmu * fabs(ccel*r) + _maxShearForce;
-      }
-      else {
-          fn = xmu * fabs(ccel*r);
-      }
+//      //double *shear = &allshear[3*neighprev];
+//      shrmag = sqrt(_history[0]*_history[0] + _history[1]*_history[1] +
+//                    _history[2]*_history[2]);
 
-      fs = sqrt(fs1*fs1 + fs2*fs2 + fs3*fs3);
+//      // rotate shear displacements
 
-      if (fs > fn) {
-        if (shrmag != 0.0) {
-          fs1 *= fn/fs;
-          fs2 *= fn/fs;
-          fs3 *= fn/fs;
-          fs *= fn/fs;
-        } else fs1 = fs2 = fs3 = fs = 0.0;
-        if (_history[3] == 1.0){
-            _history[6] += 1.0;
-            _history[3] = -1.0;
-            _history[4] = 0.0;
-            if(_D < 0.0){
-                _history[0] = 0.0;
-                _history[1] = 0.0;
-                _history[2] = 0.0;
-                fforce = 0.0;
-                fs1 = 0.0;
-                fs2 = 0.0;
-                fs3 = 0.0;
-                fs = 0.0;
-                for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
-                return 0.0;
-            }
-        }
-      }
+//      rsht = _history[0]*delx + _history[1]*dely + _history[2]*delz;
+//      rsht *= rsqinv;
 
-      // set force and return no energy
+//      if (shearupdate) {
+//        _history[0] -= rsht*delx;
+//        _history[1] -= rsht*dely;
+//        _history[2] -= rsht*delz;
+//      }
 
-      fforce = ccel;
+//      // tangential forces = shear + tangential velocity damping
 
-      // set single_extra quantities
+//      fs1 = - (kt*_history[0] + meff*gammat*vtr1);
+//      fs2 = - (kt*_history[1] + meff*gammat*vtr2);
+//      fs3 = - (kt*_history[2] + meff*gammat*vtr3);
 
-      svector[0] = _history[4];
-      svector[1] = _history[3];
-      svector[2] = fn;
-      svector[3] = fs;
-      svector[4] = _D;
-      svector[5] = _Dtensile;
-      svector[6] = i;
-      svector[7] = j;
-      svector[8] = fs1;
-      svector[9] = fs2;
-      svector[10] = fs3;
-      svector[11] = (ccel*r);
+//      // rescale frictional displacements and forces if needed
+
+//      if (_history[3] == 1.0){
+//          _maxShearForce = M_PI * radmin * _c;
+//          fn = xmu * fabs(ccel*r) + _maxShearForce;
+//      }
+//      else {
+//          fn = xmu * fabs(ccel*r);
+//      }
+
+//      fs = sqrt(fs1*fs1 + fs2*fs2 + fs3*fs3);
+
+//      if (fs > fn) {
+//        if (shrmag != 0.0) {
+//          fs1 *= fn/fs;
+//          fs2 *= fn/fs;
+//          fs3 *= fn/fs;
+//          fs *= fn/fs;
+//        } else fs1 = fs2 = fs3 = fs = 0.0;
+//        if (_history[3] == 1.0){
+//            _history[6] += 1.0;
+//            _history[3] = -1.0;
+//            _history[4] = 0.0;
+//            if(_D < 0.0){
+//                _history[0] = 0.0;
+//                _history[1] = 0.0;
+//                _history[2] = 0.0;
+//                fforce = 0.0;
+//                fs1 = 0.0;
+//                fs2 = 0.0;
+//                fs3 = 0.0;
+//                fs = 0.0;
+//                for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
+//                return 0.0;
+//            }
+//        }
+//      }
+
+//      // set force and return no energy
+
+//      fforce = ccel;
+
+//      // set single_extra quantities
+
+//      svector[0] = _history[4];
+//      svector[1] = _history[3];
+//      svector[2] = fn;
+//      svector[3] = fs;
+//      svector[4] = _D;
+//      svector[5] = _Dtensile;
+//      svector[6] = i;
+//      svector[7] = j;
+//      svector[8] = fs1;
+//      svector[9] = fs2;
+//      svector[10] = fs3;
+//      svector[11] = (ccel*r);
 
 
       return 0.0;
