@@ -46,8 +46,8 @@ PairCFM::PairCFM(LAMMPS *lmp) : Pair(lmp)
   history = 1;
   fix_history = NULL;
 
-  single_extra = 10;
-  svector = new double[10];
+  single_extra = 13;
+  svector = new double[13];
 
   neighprev = 0;
 
@@ -172,43 +172,53 @@ void PairCFM::compute(int eflag, int vflag)
 
       radmin = fmin(radj,radi);
 
-      if (update->ntimestep < 2 && rsq <= (_enlargeFactor*radsum)*(_enlargeFactor*radsum))
-      {
-          _history[3] = 1.0; // is cohesive = 1.0 ; is not cohesive = -1.0
-          _history[4] = radsum - sqrt(rsq); // save the initial distance between the particles as the equilibrium distance -negative for separate and positive for penetration
-      }
-
-      if (update->ntimestep < 2 && rsq > (_enlargeFactor*radsum)*(_enlargeFactor*radsum))
-      {
-          _history[3] = -1.0;
-          _history[4] = 0.0;
-      }
-
-      if (update->ntimestep >= 2 && _history[3] != 1.0){
-          _history[3] = -1.0;
-          _history[4] = 0.0;
-      }
-
       double _ignore = 1.0; // if ignore = -1, then, do not evaluate forces
 
-//      if (_history[3] == -1.0 && rsq >= radsum*radsum) {
-
-//        // unset non-touching neighbors
-
-//        touch[jj] = 0;
-//        //history = &allshear[3*jj];
-//        _history[0] = 0.0;
-//        _history[1] = 0.0;
-//        _history[2] = 0.0;
-//        _ignore = -1.0;
-
-//      }
-
-      if (_history[3] == 1.0)
-      {
-          _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
+      if (_history[3] != 1.0 && _history[3] != -1.0){
+          if (update->ntimestep < 1){
+              if (rsq <= (_enlargeFactor*radsum)*(_enlargeFactor*radsum)){
+                  _history[3] = 1.0; // is cohesive = 1.0 ; is not cohesive = -1.0
+                  _history[4] = radsum - sqrt(rsq); // save the initial distance between the particles as the equilibrium distance -negative for separate and positive for penetration
+              }
+              else{
+                  _history[0] = 0.0;
+                  _history[1] = 0.0;
+                  _history[2] = 0.0;
+                  _history[3] = -1.0;
+                  _history[4] = 0.0;
+                  _history[5] = 0.0;
+                  _history[6] = 0.0;
+                  _ignore = -1.0;
+              }
+          }
+          else {
+              _history[0] = 0.0;
+              _history[1] = 0.0;
+              _history[2] = 0.0;
+              _history[3] = -1.0;
+              _history[4] = 0.0;
+          }
       }
-      else _Dtensile = 0.0;
+
+      if (_history[3] == -1.0 && rsq >= radsum*radsum) {
+
+        // unset non-touching neighbors
+
+        touch[jj] = 0;
+        //history = &allshear[3*jj];
+        _history[0] = 0.0;
+        _history[1] = 0.0;
+        _history[2] = 0.0;
+        _history[4] = 0.0;
+        _ignore = -1.0;
+
+      }
+
+      if (_history[3] == -1.0)
+      {
+          _Dtensile = 0.0;
+      }
+      else _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
 
       _D = (radsum - sqrt(rsq)) - _history[4];
 
@@ -221,6 +231,7 @@ void PairCFM::compute(int eflag, int vflag)
               _history[0] = 0.0;
               _history[1] = 0.0;
               _history[2] = 0.0;
+              _history[4] = 0.0;
               _ignore = -1.0;
           }
           if (((-1.0*_D) > _Dtensile) && (_history[3] == 1.0))  // if the current displacement is bigger than the allowed
@@ -360,6 +371,9 @@ void PairCFM::compute(int eflag, int vflag)
                   _history[0] = 0.0;
                   _history[1] = 0.0;
                   _history[2] = 0.0;
+                  fs1 = 0.0;
+                  fs2 = 0.0;
+                  fs3 = 0.0;
               }
           }
         }
@@ -500,7 +514,7 @@ void PairCFM::init_style()
 
   if (history && fix_history == NULL) {
     char dnumstr[16];
-    sprintf(dnumstr,"%d",6);
+    sprintf(dnumstr,"%d",7);
     char **fixarg = new char*[4];
     fixarg[0] = (char *) "NEIGH_HISTORY";
     fixarg[1] = (char *) "all";
@@ -696,6 +710,8 @@ double PairCFM::single(int i, int j, int itype, int jtype,
   double vtr1,vtr2,vtr3,vrel,shrmag,rsht;
   double fs1,fs2,fs3,fs,fn;
 
+  int shearupdate = 1;
+
   double *radius = atom->radius;
   radi = radius[i];
   radj = radius[j];
@@ -705,46 +721,66 @@ double PairCFM::single(int i, int j, int itype, int jtype,
   double *_history = &allshear[3*neighprev];
   double radmin = fmin(radi,radj);
 
-  if (update->ntimestep < 2 && rsq <= (_enlargeFactor*radsum)*(_enlargeFactor*radsum)){
-      _history[3] = 1.0;
-      _history[4] = radsum - sqrt(rsq);
+//  double *allshear_j = fix_history->firstvalue[j];
+//  double *_history_j = &allshear[3*neighprev];
+
+  if (_history[3] != 1.0 && _history[3] != -1.0){
+      if (update->ntimestep < 1){
+          if (rsq < (_enlargeFactor*radsum)*(_enlargeFactor*radsum)){
+              _history[3] = 1.0;
+              _history[4] = radsum - sqrt(rsq);
+              _Dtensile = (M_PI * radmin * _t) / kn;
+          }
+          else{
+              _history[0] = 0.0;
+              _history[1] = 0.0;
+              _history[2] = 0.0;
+              _history[3] = -1.0;
+              _history[4] = 0.0;
+              _history[5] = 0.0;
+              _history[6] = 0.0;
+              fforce = 0.0;
+              for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
+              return 0.0;
+          }
+      }
+      else {
+          _history[0] = 0.0;
+          _history[1] = 0.0;
+          _history[2] = 0.0;
+          _history[3] = -1.0;
+          _history[4] = 0.0;
+      }
   }
 
-  if (update->ntimestep < 2 && rsq > (_enlargeFactor*radsum)*(_enlargeFactor*radsum)){
-      _history[3] = -1.0;
-      _history[4] = 0.0;
-      fforce = 0.0;
-      for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
-      return 0.0;
+  if (_history[3] == -1.0 && rsq >= radsum*radsum) {
+    fforce = 0.0;
+    for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
+    return 0.0;
   }
 
-  if (update->ntimestep >= 2 && _history[3] != 1.0){
-      _history[3] = -1.0;
-      _history[4] = 0.0;
-  }
-
-//  if (_history[3] == -1.0 && rsq >= radsum*radsum) {
-//    fforce = 0.0;
-//    _ignore = -1.0;
-//    for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
-//    return 0.0;
-//  }
-
-  if (_history[3] == 1.0)
+  if (_history[3] == -1.0)
   {
-      _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
+      _Dtensile = 0.0;
   }
-  else _Dtensile = 0.0;
+  else _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
 
   _D = (radsum -sqrt(rsq)) - _history[4];
 
   if(_D < 0){
       if (_history[3] == -1.0){
           fforce = 0.0;
+          _history[0] = 0.0;
+          _history[1] = 0.0;
+          _history[2] = 0.0;
+          _history[4] = 0.0;
           for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
           return 0.0;
       }
       if (((-1.0*_D) > _Dtensile) && (_history[3] == 1.0)){
+          _history[0] = 0.0;
+          _history[1] = 0.0;
+          _history[2] = 0.0;
           _history[3] = -1.0;
           _history[4] = 0.0;
           _history[5]+= 1.0;
@@ -847,6 +883,12 @@ double PairCFM::single(int i, int j, int itype, int jtype,
       rsht = _history[0]*delx + _history[1]*dely + _history[2]*delz;
       rsht *= rsqinv;
 
+      if (shearupdate) {
+        _history[0] -= rsht*delx;
+        _history[1] -= rsht*dely;
+        _history[2] -= rsht*delz;
+      }
+
       // tangential forces = shear + tangential velocity damping
 
       fs1 = - (kt*_history[0] + meff*gammat*vtr1);
@@ -877,7 +919,14 @@ double PairCFM::single(int i, int j, int itype, int jtype,
             _history[3] = -1.0;
             _history[4] = 0.0;
             if(_D < 0.0){
+                _history[0] = 0.0;
+                _history[1] = 0.0;
+                _history[2] = 0.0;
                 fforce = 0.0;
+                fs1 = 0.0;
+                fs2 = 0.0;
+                fs3 = 0.0;
+                fs = 0.0;
                 for (int m = 0; m < single_extra; m++) svector[m] = 0.0;
                 return 0.0;
             }
@@ -890,16 +939,19 @@ double PairCFM::single(int i, int j, int itype, int jtype,
 
       // set single_extra quantities
 
-      svector[0] = fs1;
-      svector[1] = fs2;
-      svector[2] = fs3;
+      svector[0] = _history[4];
+      svector[1] = _history[3];
+      svector[2] = fn;
       svector[3] = fs;
-      svector[4] = vn1;
-      svector[5] = vn2;
-      svector[6] = vn3;
-      svector[7] = vt1;
-      svector[8] = vt2;
-      svector[9] = vt3;
+      svector[4] = _D;
+      svector[5] = _Dtensile;
+      svector[6] = i;
+      svector[7] = j;
+      svector[8] = fs1;
+      svector[9] = fs2;
+      svector[10] = fs3;
+      svector[11] = (ccel*r);
+
 
       return 0.0;
 }
