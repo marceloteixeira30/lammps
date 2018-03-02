@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "pair_gran_CFM.h"
+#include "pair_gran_CFM_enlFac.h"
 #include "atom.h"
 #include "atom_vec.h"
 #include "domain.h"
@@ -39,7 +39,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-PairCFM::PairCFM(LAMMPS *lmp) : Pair(lmp)
+PairCFM_enlFac::PairCFM_enlFac(LAMMPS *lmp_enlFac) : Pair(lmp_enlFac)
 {
   single_enable = 1;
   no_virial_fdotr_compute = 1;
@@ -61,7 +61,7 @@ PairCFM::PairCFM(LAMMPS *lmp) : Pair(lmp)
 
 /* ---------------------------------------------------------------------- */
 
-PairCFM::~PairCFM()
+PairCFM_enlFac::~PairCFM_enlFac()
 {
   delete [] svector;
   if (fix_history) modify->delete_fix("NEIGH_HISTORY");
@@ -81,7 +81,7 @@ PairCFM::~PairCFM()
 
 /* ---------------------------------------------------------------------- */
 
-void PairCFM::compute(int eflag, int vflag)
+void PairCFM_enlFac::compute(int eflag, int vflag)
 {
   int i,j,ii,jj,inum,jnum;
   double xtmp,ytmp,ztmp,delx,dely,delz,fx,fy,fz;
@@ -164,8 +164,6 @@ void PairCFM::compute(int eflag, int vflag)
       radj = radius[j];
       radsum = radi + radj;
 
-      _D = radsum - sqrt(rsq);
-
       _history = &allshear[3*jj];   // history[0] = shear1 / history[1] = shear2 / history[2] = shear3 / history[3] = isCohesive / history[4] = initialD /
                                     // history[5] = tensileBreakage / history[6] = shearBreakage
 
@@ -182,8 +180,9 @@ void PairCFM::compute(int eflag, int vflag)
           _history[2] = 0.0;
           _history[5] = 0.0;
           _history[6] = 0.0;
-          if (rsq <= (radsum*radsum)){
+          if (rsq <= (_enlargeFactor*radsum)*(_enlargeFactor*radsum)){
               _history[3] = 1.0; // is cohesive = 1.0 ; is not cohesive = -1.0
+              _history[4] = radsum - sqrt(rsq); // save the initial distance between the particles as the equilibrium distance -negative for separate and positive for penetration
           }
           else{
               touch[jj] = 0;
@@ -207,9 +206,11 @@ void PairCFM::compute(int eflag, int vflag)
       if (_history[3] > 0)
       {
           _Dtensile = (M_PI * radmin * _t) / kn; // maximum distance between particles before the bond breaks (always positive)
+          _D = (radsum - sqrt(rsq)) - _history[4];
       }
       else {
           _Dtensile = 0.0;
+          _D = radsum - sqrt(rsq);
       }
 
       if (_D < 0)   // if particles are further apart than in the initial state
@@ -282,8 +283,8 @@ void PairCFM::compute(int eflag, int vflag)
         // normal forces = Hookian contact + normal velocity damping
 
         damp = meff*gamman*vnnr*rsqinv;
-        ccel = kn*(radsum-r)*rinv - damp;
-        //ccel = kn*(_D)*rinv - damp;
+        //ccel = kn*(radsum-r)*rinv - damp;
+        ccel = kn*(_D)*rinv - damp;
 
         // relative velocities
 
@@ -407,7 +408,7 @@ void PairCFM::compute(int eflag, int vflag)
    allocate all arrays
 ------------------------------------------------------------------------- */
 
-void PairCFM::allocate()
+void PairCFM_enlFac::allocate()
 {
   allocated = 1;
   int n = atom->ntypes;
@@ -429,7 +430,7 @@ void PairCFM::allocate()
    global settings
 ------------------------------------------------------------------------- */
 
-void PairCFM::settings(int narg, char **arg)
+void PairCFM_enlFac::settings(int narg, char **arg)
 {
   if (narg != 9) error->all(FLERR,"Illegal pair_style command");
 
@@ -458,7 +459,7 @@ void PairCFM::settings(int narg, char **arg)
    set coeffs for one or more type pairs
 ------------------------------------------------------------------------- */
 
-void PairCFM::coeff(int narg, char **arg)
+void PairCFM_enlFac::coeff(int narg, char **arg)
 {
   if (narg > 2) error->all(FLERR,"Incorrect args for pair coefficients");
   if (!allocated) allocate();
@@ -482,7 +483,7 @@ void PairCFM::coeff(int narg, char **arg)
    init specific to this pair style
 ------------------------------------------------------------------------- */
 
-void PairCFM::init_style()
+void PairCFM_enlFac::init_style()
 {
   int i;
 
@@ -590,7 +591,7 @@ void PairCFM::init_style()
    init for one type pair i,j and corresponding j,i
 ------------------------------------------------------------------------- */
 
-double PairCFM::init_one(int i, int j)
+double PairCFM_enlFac::init_one(int i, int j)
 {
   if (!allocated) allocate();
 
@@ -607,7 +608,7 @@ double PairCFM::init_one(int i, int j)
   proc 0 writes to restart file
 ------------------------------------------------------------------------- */
 
-void PairCFM::write_restart(FILE *fp)
+void PairCFM_enlFac::write_restart(FILE *fp)
 {
   write_restart_settings(fp);
 
@@ -621,7 +622,7 @@ void PairCFM::write_restart(FILE *fp)
   proc 0 reads from restart file, bcasts
 ------------------------------------------------------------------------- */
 
-void PairCFM::read_restart(FILE *fp)
+void PairCFM_enlFac::read_restart(FILE *fp)
 {
   read_restart_settings(fp);
   allocate();
@@ -639,7 +640,7 @@ void PairCFM::read_restart(FILE *fp)
   proc 0 writes to restart file
 ------------------------------------------------------------------------- */
 
-void PairCFM::write_restart_settings(FILE *fp)
+void PairCFM_enlFac::write_restart_settings(FILE *fp)
 {
   fwrite(&kn,sizeof(double),1,fp);
   fwrite(&kt,sizeof(double),1,fp);
@@ -656,7 +657,7 @@ void PairCFM::write_restart_settings(FILE *fp)
   proc 0 reads from restart file, bcasts
 ------------------------------------------------------------------------- */
 
-void PairCFM::read_restart_settings(FILE *fp)
+void PairCFM_enlFac::read_restart_settings(FILE *fp)
 {
   if (comm->me == 0) {
     fread(&kn,sizeof(double),1,fp);
@@ -682,14 +683,14 @@ void PairCFM::read_restart_settings(FILE *fp)
 
 /* ---------------------------------------------------------------------- */
 
-void PairCFM::reset_dt()
+void PairCFM_enlFac::reset_dt()
 {
   dt = update->dt;
 }
 
 /* ---------------------------------------------------------------------- */
 
-double PairCFM::single(int i, int j, int itype, int jtype,
+double PairCFM_enlFac::single(int i, int j, int itype, int jtype,
                                     double rsq,
                                     double factor_coul, double factor_lj,
                                     double &fforce)
@@ -958,7 +959,7 @@ double PairCFM::single(int i, int j, int itype, int jtype,
 
 /* ---------------------------------------------------------------------- */
 
-int PairCFM::pack_forward_comm(int n, int *list, double *buf,
+int PairCFM_enlFac::pack_forward_comm(int n, int *list, double *buf,
                                             int pbc_flag, int *pbc)
 {
   int i,j,m;
@@ -973,7 +974,7 @@ int PairCFM::pack_forward_comm(int n, int *list, double *buf,
 
 /* ---------------------------------------------------------------------- */
 
-void PairCFM::unpack_forward_comm(int n, int first, double *buf)
+void PairCFM_enlFac::unpack_forward_comm(int n, int first, double *buf)
 {
   int i,m,last;
 
@@ -987,7 +988,7 @@ void PairCFM::unpack_forward_comm(int n, int first, double *buf)
    memory usage of local atom-based arrays
 ------------------------------------------------------------------------- */
 
-double PairCFM::memory_usage()
+double PairCFM_enlFac::memory_usage()
 {
   double bytes = nmax * sizeof(double);
   return bytes;
